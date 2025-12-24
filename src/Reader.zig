@@ -208,6 +208,9 @@ pub fn Reader(comptime limits: ReadLimits) type {
                 .bool => {
                     return .{ .bool = (decoded_tag.data != 0) };
                 },
+                .void => {
+                    return .{ .void = undefined };
+                },
                 .varIntBytes => {
                     const len = try self.readBytesLength(.varIntBytes, decoded_tag.data);
                     if (len > self.bytes.len - self.pos) return error.UnexpectedEof;
@@ -325,7 +328,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
                 .f16 => self.pos += 2,
                 .i16, .u16 => self.pos += 2,
                 .i8, .u8 => self.pos += 1,
-                .null, .bool => {},
+                .null, .bool, .void => {},
                 .smallIntPositive, .smallIntNegative, .smallUint => {},
 
                 // Variable length integers
@@ -532,11 +535,11 @@ pub fn Reader(comptime limits: ReadLimits) type {
 
             const root_peek = try self.peekTag();
 
-                if (root_peek.tag != .object and root_peek.tag != .array) {
-                    if (remaining > 0) {
-                        var has_empty = false;
-                        for (queries) |q| {
-                            if (!q.resolved and q.path.len == 0) {
+            if (root_peek.tag != .object and root_peek.tag != .array) {
+                if (remaining > 0) {
+                    var has_empty = false;
+                    for (queries) |q| {
+                        if (!q.resolved and q.path.len == 0) {
                             has_empty = true;
                             break;
                         }
@@ -551,8 +554,8 @@ pub fn Reader(comptime limits: ReadLimits) type {
                                 remaining -= 1;
                             }
                         }
-                        }
                     }
+                }
 
                 if (queries.len > 1) {
                     const LessIdx = struct {
@@ -878,20 +881,20 @@ pub fn Reader(comptime limits: ReadLimits) type {
             const off = index * elem_size;
             const chunk = ta.bytes[off..][0..elem_size];
 
-	            return switch (ta.elem) {
-	                .u8 => .{ .u8 = chunk[0] },
-	                .i8 => .{ .i8 = @bitCast(chunk[0]) },
-	                .u16 => .{ .u16 = std.mem.readInt(u16, chunk[0..2], .little) },
-	                .i16 => .{ .i16 = std.mem.readInt(i16, chunk[0..2], .little) },
-	                .u32 => .{ .u32 = std.mem.readInt(u32, chunk[0..4], .little) },
-	                .i32 => .{ .i32 = std.mem.readInt(i32, chunk[0..4], .little) },
-	                .u64 => .{ .u64 = std.mem.readInt(u64, chunk[0..8], .little) },
-	                .i64 => .{ .i64 = std.mem.readInt(i64, chunk[0..8], .little) },
-	                .f32 => .{ .f32 = @bitCast(std.mem.readInt(u32, chunk[0..4], .little)) },
-	                .f64 => .{ .f64 = @bitCast(std.mem.readInt(u64, chunk[0..8], .little)) },
-	                .f16 => .{ .f16 = @bitCast(std.mem.readInt(u16, chunk[0..2], .little)) },
-	            };
-	        }
+            return switch (ta.elem) {
+                .u8 => .{ .u8 = chunk[0] },
+                .i8 => .{ .i8 = @bitCast(chunk[0]) },
+                .u16 => .{ .u16 = std.mem.readInt(u16, chunk[0..2], .little) },
+                .i16 => .{ .i16 = std.mem.readInt(i16, chunk[0..2], .little) },
+                .u32 => .{ .u32 = std.mem.readInt(u32, chunk[0..4], .little) },
+                .i32 => .{ .i32 = std.mem.readInt(i32, chunk[0..4], .little) },
+                .u64 => .{ .u64 = std.mem.readInt(u64, chunk[0..8], .little) },
+                .i64 => .{ .i64 = std.mem.readInt(i64, chunk[0..8], .little) },
+                .f32 => .{ .f32 = @bitCast(std.mem.readInt(u32, chunk[0..4], .little)) },
+                .f64 => .{ .f64 = @bitCast(std.mem.readInt(u64, chunk[0..8], .little)) },
+                .f16 => .{ .f16 = @bitCast(std.mem.readInt(u16, chunk[0..2], .little)) },
+            };
+        }
 
         /// Reads a value at a given path. Path format: "key", "key.nested", "array[0]", "obj.arr[2].name"
         /// Returns null if the path doesn't exist or points to an incompatible type.

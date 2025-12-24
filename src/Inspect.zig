@@ -185,6 +185,7 @@ pub fn Inspect(comptime limits: ReadLimits) type {
                 .varIntBytes => try self.writeString(val.varIntBytes),
                 .smallBytes => try self.writeString(val.smallBytes),
                 .null => try w.writeAll("null"),
+                .void => try w.writeAll("void"),
                 .containerEnd => try w.writeAll("END"),
                 .smallIntPositive => try w.print("{d}", .{val.smallIntPositive}),
                 .smallIntNegative => try w.print("-{d}", .{val.smallIntNegative}),
