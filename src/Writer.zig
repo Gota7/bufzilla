@@ -362,6 +362,15 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
             }
             try self.endContainer();
         },
+        .@"enum" => |enum_info| {
+            inline for (enum_info.fields) |field| {
+                const field_tag = @field(T, field.name);
+                if (field_tag == data) {
+                    try self.writeAnyExplicit(@TypeOf(field.name), field.name);
+                    break;
+                }
+            }
+        },
         .@"union" => |union_info| {
             if (union_info.tag_type) |TT| {
                 const tag: TT = data;
@@ -369,6 +378,7 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
                     const field_tag = @field(TT, field.name);
                     if (field_tag == tag) {
                         const field_value = @field(data, field.name);
+                        try self.writeAnyExplicit(@TypeOf(field.name), field.name);
                         try self.writeAnyExplicit(@TypeOf(field_value), field_value);
                         break;
                     }
