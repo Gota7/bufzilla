@@ -148,6 +148,7 @@ pub const Value = union(enum) {
     // Simple types
     bool: bool,
     null: void,
+    void: void,
 
     // Small signed integers where magnitude (0..7) is stored in the tag data bits.
     // For negative small ints, magnitude 0 is invalid (no negative zero).

@@ -188,6 +188,9 @@ pub fn Reader(comptime limits: ReadLimits) type {
                 .bool => {
                     return .{ .bool = (decoded_tag.data != 0) };
                 },
+                .void => {
+                    return .{ .void = undefined };
+                },
                 .varIntBytes => {
                     const len = try self.readBytesLength(.varIntBytes, decoded_tag.data);
                     return .{ .bytes = try self.reader.take(len) };
@@ -283,7 +286,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
                 .f16 => try self.reader.discardAll(2),
                 .i16, .u16 => try self.reader.discardAll(2),
                 .i8, .u8 => try self.reader.discardAll(1),
-                .null, .bool => {},
+                .null, .bool, .void => {},
                 .smallIntPositive, .smallIntNegative, .smallUint => {},
 
                 // Variable length integers

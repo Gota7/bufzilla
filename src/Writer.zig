@@ -139,7 +139,7 @@ pub fn write(self: *Writer, data: common.Value, comptime tag: std.meta.Tag(commo
                 .f64 => try w.writeInt(u64, @bitCast(data.f64), .little),
                 .f32 => try w.writeInt(u32, @bitCast(data.f32), .little),
                 .f16 => try w.writeInt(u16, @bitCast(data.f16), .little),
-                .object, .array, .containerEnd, .null => {},
+                .object, .array, .containerEnd, .null, .void => {},
                 .bytes => {
                     try w.writeInt(u64, data.bytes.len, .little);
                     try w.writeAll(data.bytes);
@@ -362,6 +362,15 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
             }
             try self.endContainer();
         },
+        .@"enum" => |enum_info| {
+            inline for (enum_info.fields) |field| {
+                const field_tag = @field(T, field.name);
+                if (field_tag == data) {
+                    try self.writeAnyExplicit(@TypeOf(field.name), field.name);
+                    break;
+                }
+            }
+        },
         .@"union" => |union_info| {
             if (union_info.tag_type) |TT| {
                 const tag: TT = data;
@@ -369,6 +378,7 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
                     const field_tag = @field(TT, field.name);
                     if (field_tag == tag) {
                         const field_value = @field(data, field.name);
+                        try self.writeAnyExplicit(@TypeOf(field.name), field.name);
                         try self.writeAnyExplicit(@TypeOf(field_value), field_value);
                         break;
                     }
@@ -377,7 +387,7 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
                 @compileError("bufzilla: untagged unions are not supported");
             }
         },
-        .void => {},
+        .void => try self.write(common.Value{ .void = undefined }, .void),
         else => {
             @compileError("bufzilla: unsupported data type: " ++ @typeName(T));
         },
