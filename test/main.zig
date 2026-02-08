@@ -38,8 +38,11 @@ test "writer/allocating: primitive data types" {
     try writer.endContainer();
     try writer.writeAny("d");
     try writer.startArray();
+    try writer.writeAny("f64");
     try writer.writeAny(123.123);
+    try writer.writeAny("null");
     try writer.writeAny(null);
+    try writer.writeAny("string");
     try writer.writeAny("value");
     try writer.endContainer();
     try writer.endContainer();
@@ -48,7 +51,7 @@ test "writer/allocating: primitive data types" {
     @memcpy(shared_encoded[0..written.len], written);
     shared_encoded_len = written.len;
 
-    try std.testing.expect(written.len == 33);
+    try std.testing.expect(written.len == 49);
 }
 
 test "writer/allocating: zig struct serialization" {
@@ -103,8 +106,11 @@ test "writer/fixed: primitive data types" {
     try writer.endContainer();
     try writer.writeAny("d");
     try writer.startArray();
+    try writer.writeAny("f64");
     try writer.writeAny(123.123);
+    try writer.writeAny("null");
     try writer.writeAny(null);
+    try writer.writeAny("string");
     try writer.writeAny("value");
     try writer.endContainer();
     try writer.endContainer();
@@ -718,8 +724,11 @@ test "reader: sequential reading" {
     try std.testing.expect(try reader.read() == Value.containerEnd);
     try std.testing.expectEqualStrings("d", (try reader.read()).bytes);
     try std.testing.expect(try reader.read() == Value.array);
+    try std.testing.expect(try reader.read() == Value.bytes);
     try std.testing.expectEqual(123.123, (try reader.read()).f64);
+    try std.testing.expect(try reader.read() == Value.bytes);
     try std.testing.expect(try reader.read() == Value.null);
+    try std.testing.expect(try reader.read() == Value.bytes);
     try std.testing.expectEqualStrings("value", (try reader.read()).bytes);
     try std.testing.expect(try reader.read() == Value.containerEnd);
     try std.testing.expect(try reader.read() == Value.containerEnd);
@@ -804,8 +813,11 @@ test "inspect/allocating: json output" {
         \\        "c": true
         \\    },
         \\    "d": [
+        \\        "f64",
         \\        123.12300000000000,
+        \\        "null",
         \\        null,
+        \\        "string",
         \\        "value"
         \\    ]
         \\}
