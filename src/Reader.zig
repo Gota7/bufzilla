@@ -38,7 +38,7 @@ pub const PathQuery = struct {
 };
 
 /// Error type for read operations.
-pub const Error = error{ UnexpectedEof, InvalidEnumTag, InvalidSignedMagnitude, UnexpectedContainerEnd, MaxDepthExceeded, BytesTooLong, ArrayTooLarge, ObjectTooLarge };
+pub const Error = std.Io.Reader.Error || error{ InvalidEnumTag, InvalidSignedMagnitude, UnexpectedContainerEnd, MaxDepthExceeded, BytesTooLong, ArrayTooLarge, ObjectTooLarge };
 
 pub fn Reader(comptime limits: ReadLimits) type {
     // Array/object limits require depth limit for counter stack allocation
@@ -57,11 +57,8 @@ pub fn Reader(comptime limits: ReadLimits) type {
     return struct {
         const Self = @This();
 
-        // The underlying byte array.
-        bytes: []const u8,
-
-        // The current position in the byte array.
-        pos: usize = 0,
+        // The underlying reader.
+        reader: *std.Io.Reader,
 
         // The current traversal depth.
         depth: u32 = 0,
@@ -70,28 +67,21 @@ pub fn Reader(comptime limits: ReadLimits) type {
         iteration_counts: [counter_stack_size]usize = [_]usize{0} ** counter_stack_size,
 
         /// Initializes the reader.
-        pub fn init(bytes: []const u8) Self {
-            return .{ .bytes = bytes };
+        pub fn init(reader: *std.Io.Reader) Self {
+            return .{ .reader = reader };
         }
 
         /// Reads a single data item of given type and advances the position.
         fn readBytes(self: *Self, comptime T: type) !T {
-            if (@sizeOf(T) > self.bytes.len - self.pos) return error.UnexpectedEof;
-
-            const bytes = self.bytes[self.pos..(self.pos + @sizeOf(T))];
-            self.pos += @sizeOf(T);
-
-            switch (@typeInfo(T)) {
-                .int => return std.mem.readInt(T, bytes[0..@sizeOf(T)], .little),
-                .float => {
-                    const IntType = std.meta.Int(.unsigned, @bitSizeOf(T));
-                    return @bitCast(std.mem.readInt(IntType, bytes[0..@sizeOf(T)], .little));
-                },
+            return switch (@typeInfo(T)) {
+                .int => try self.reader.takeInt(T, .little),
+                .float => |float_info| @bitCast(try self.reader.takeInt(@Type(.{ .int = .{ .signedness = .signed, .bits = float_info.bits } }), .little)),
                 else => @compileError("readBytes: unsupported type"),
-            }
+            };
         }
 
         /// Reads a single data item from the underlying byte array and advances the position.
+        /// If bytes are returned, they will be invalidated by the next read.
         pub fn read(self: *Self) !common.Value {
             const tag_byte = try self.readBytes(u8);
 
@@ -129,29 +119,19 @@ pub fn Reader(comptime limits: ReadLimits) type {
                 },
                 .varIntUnsigned => {
                     const size: usize = @as(usize, decoded_tag.data) + 1;
-                    if (size > self.bytes.len - self.pos) return error.UnexpectedEof;
-
-                    const intBytes = self.bytes[self.pos..(self.pos + size)];
-                    self.pos += size;
-
+                    const intBytes = try self.reader.take(size);
                     return .{ .u64 = common.decodeVarInt(intBytes) };
                 },
                 .varIntSignedPositive => {
                     const size: usize = @as(usize, decoded_tag.data) + 1;
-                    if (size > self.bytes.len - self.pos) return error.UnexpectedEof;
-
-                    const intBytes = self.bytes[self.pos..(self.pos + size)];
-                    self.pos += size;
+                    const intBytes = try self.reader.take(size);
                     const magnitude = common.decodeVarInt(intBytes);
                     if (magnitude > @as(u64, @intCast(std.math.maxInt(i64)))) return error.InvalidSignedMagnitude;
                     return .{ .i64 = @intCast(magnitude) };
                 },
                 .varIntSignedNegative => {
                     const size: usize = @as(usize, decoded_tag.data) + 1;
-                    if (size > self.bytes.len - self.pos) return error.UnexpectedEof;
-
-                    const intBytes = self.bytes[self.pos..(self.pos + size)];
-                    self.pos += size;
+                    const intBytes = try self.reader.take(size);
                     const magnitude = common.decodeVarInt(intBytes);
                     if (magnitude == 0) return error.InvalidSignedMagnitude;
                     if (magnitude == (@as(u64, 1) << 63)) return .{ .i64 = std.math.minInt(i64) };
@@ -210,11 +190,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
                 },
                 .varIntBytes => {
                     const len = try self.readBytesLength(.varIntBytes, decoded_tag.data);
-                    if (len > self.bytes.len - self.pos) return error.UnexpectedEof;
-
-                    const str_ptr = self.pos;
-                    self.pos += len;
-                    return .{ .bytes = self.bytes[str_ptr..(str_ptr + len)] };
+                    return .{ .bytes = try self.reader.take(len) };
                 },
                 .smallBytes => {
                     const len: usize = decoded_tag.data;
@@ -223,25 +199,17 @@ pub fn Reader(comptime limits: ReadLimits) type {
                         if (len > max) return error.BytesTooLong;
                     }
 
-                    if (len > self.bytes.len - self.pos) return error.UnexpectedEof;
-
-                    const str_ptr = self.pos;
-                    self.pos += len;
-                    return .{ .bytes = self.bytes[str_ptr..(str_ptr + len)] };
+                    return .{ .bytes = try self.reader.take(len) };
                 },
                 .typedArray => {
                     const hdr = try self.readTypedArrayHeader(decoded_tag.data);
-                    const start = self.pos;
-                    self.pos += hdr.payload_len;
-                    return .{ .typedArray = .{ .elem = hdr.elem, .count = hdr.count, .bytes = self.bytes[start..][0..hdr.payload_len] } };
+                    const bytes = try self.reader.take(hdr.payload_len);
+                    return .{ .typedArray = .{ .elem = hdr.elem, .count = hdr.count, .bytes = bytes } };
                 },
                 .bytes => {
                     const len = try self.readBytesLength(.bytes, decoded_tag.data);
-                    if (len > self.bytes.len - self.pos) return error.UnexpectedEof;
-
-                    const str_ptr = self.pos;
-                    self.pos += len;
-                    return .{ .bytes = self.bytes[str_ptr..(str_ptr + len)] };
+                    const bytes = try self.reader.take(len);
+                    return .{ .bytes = bytes };
                 },
             }
         }
@@ -255,8 +223,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
 
         /// Peeks at the next tag without advancing position.
         fn peekTag(self: *Self) !PeekResult {
-            if (self.pos >= self.bytes.len) return error.UnexpectedEof;
-            const tag_byte = self.bytes[self.pos];
+            const tag_byte = try self.reader.peekByte();
             const decoded = common.decodeTag(tag_byte);
             const tag = try std.meta.intToEnum(std.meta.Tag(common.Value), decoded.tag);
             return .{ .tag = tag, .data = decoded.data };
@@ -266,19 +233,15 @@ pub fn Reader(comptime limits: ReadLimits) type {
         inline fn readBytesLength(self: *Self, val_type: std.meta.Tag(common.Value), tag_data: u3) !usize {
             if (val_type == .varIntBytes) {
                 const size_len: usize = @as(usize, tag_data) + 1;
-                if (size_len > self.bytes.len - self.pos) return error.UnexpectedEof;
-                const len = common.decodeVarInt(self.bytes[self.pos..][0..size_len]);
-                self.pos += size_len;
+                const bytes = try self.reader.take(size_len);
+                const len = common.decodeVarInt(bytes);
 
                 if (limits.max_bytes_length) |max| {
                     if (len > max) return error.BytesTooLong;
                 }
                 return len;
             } else { // .bytes
-                if (8 > self.bytes.len - self.pos) return error.UnexpectedEof;
-                const len = std.mem.readInt(u64, self.bytes[self.pos..][0..8], .little);
-                self.pos += 8;
-
+                const len = try self.reader.takeInt(u64, .little);
                 if (limits.max_bytes_length) |max| {
                     if (len > max) return error.BytesTooLong;
                 }
@@ -293,15 +256,11 @@ pub fn Reader(comptime limits: ReadLimits) type {
         };
 
         inline fn readTypedArrayHeader(self: *Self, tag_data: u3) !TypedArrayHeader {
-            if (self.pos >= self.bytes.len) return error.UnexpectedEof;
-            const elem_byte = self.bytes[self.pos];
-            self.pos += 1;
+            const elem_byte = try self.reader.takeByte();
             const elem = try std.meta.intToEnum(common.TypedArrayElem, elem_byte);
 
             const count_len: usize = @as(usize, tag_data) + 1;
-            if (count_len > self.bytes.len - self.pos) return error.UnexpectedEof;
-            const count_u64 = common.decodeVarInt(self.bytes[self.pos..][0..count_len]);
-            self.pos += count_len;
+            const count_u64 = common.decodeVarInt(try self.reader.take(count_len));
 
             if (count_u64 > std.math.maxInt(usize)) return error.BytesTooLong;
             const count: usize = @intCast(count_u64);
@@ -310,7 +269,6 @@ pub fn Reader(comptime limits: ReadLimits) type {
             if (limits.max_bytes_length) |max| {
                 if (payload_len > max) return error.BytesTooLong;
             }
-            if (payload_len > self.bytes.len - self.pos) return error.UnexpectedEof;
 
             return .{ .elem = elem, .count = count, .payload_len = payload_len };
         }
@@ -320,19 +278,18 @@ pub fn Reader(comptime limits: ReadLimits) type {
         inline fn skipOneValue(self: *Self, decoded: common.Tag, typ: std.meta.Tag(common.Value)) !SkipEvent {
             switch (typ) {
                 // Fixed size types
-                .f64, .i64, .u64 => self.pos += 8,
-                .f32, .i32, .u32 => self.pos += 4,
-                .f16 => self.pos += 2,
-                .i16, .u16 => self.pos += 2,
-                .i8, .u8 => self.pos += 1,
+                .f64, .i64, .u64 => try self.reader.discardAll(8),
+                .f32, .i32, .u32 => try self.reader.discardAll(4),
+                .f16 => try self.reader.discardAll(2),
+                .i16, .u16 => try self.reader.discardAll(2),
+                .i8, .u8 => try self.reader.discardAll(1),
                 .null, .bool => {},
                 .smallIntPositive, .smallIntNegative, .smallUint => {},
 
                 // Variable length integers
                 .varIntUnsigned, .varIntSignedPositive, .varIntSignedNegative => {
                     const size: usize = @as(usize, decoded.data) + 1;
-                    if (size > self.bytes.len - self.pos) return error.UnexpectedEof;
-                    self.pos += size;
+                    try self.reader.discardAll(size);
                 },
 
                 // Byte arrays
@@ -341,17 +298,15 @@ pub fn Reader(comptime limits: ReadLimits) type {
                     if (limits.max_bytes_length) |max| {
                         if (len > max) return error.BytesTooLong;
                     }
-                    if (len > self.bytes.len - self.pos) return error.UnexpectedEof;
-                    self.pos += len;
+                    try self.reader.discardAll(len);
                 },
                 .typedArray => {
                     const hdr = try self.readTypedArrayHeader(decoded.data);
-                    self.pos += hdr.payload_len;
+                    try self.reader.discardAll(hdr.payload_len);
                 },
                 .varIntBytes, .bytes => {
                     const len = try self.readBytesLength(typ, decoded.data);
-                    if (len > self.bytes.len - self.pos) return error.UnexpectedEof;
-                    self.pos += len;
+                    try self.reader.discardAll(len);
                 },
 
                 .array, .object => return .enter_container,
@@ -363,10 +318,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
 
         /// Skips a single value without materializing it.
         pub fn skipValue(self: *Self) !void {
-            if (self.pos >= self.bytes.len) return error.UnexpectedEof;
-
-            const tag_byte = self.bytes[self.pos];
-            self.pos += 1;
+            const tag_byte = try self.reader.takeByte();
 
             const decoded = common.decodeTag(tag_byte);
             const val_type = try std.meta.intToEnum(std.meta.Tag(common.Value), decoded.tag);
@@ -379,10 +331,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
 
                     var nest_depth: u32 = 1;
                     while (nest_depth > 0) {
-                        if (self.pos >= self.bytes.len) return error.UnexpectedEof;
-
-                        const inner_tag = self.bytes[self.pos];
-                        self.pos += 1;
+                        const inner_tag = try self.reader.takeByte();
 
                         const inner_decoded = common.decodeTag(inner_tag);
                         const inner_type = try std.meta.intToEnum(std.meta.Tag(common.Value), inner_decoded.tag);
@@ -408,10 +357,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
 
         /// Reads the bytes content of a varIntBytes or bytes tag and returns a slice.
         fn readBytesSlice(self: *Self) ![]const u8 {
-            if (self.pos >= self.bytes.len) return error.UnexpectedEof;
-
-            const tag_byte = self.bytes[self.pos];
-            self.pos += 1;
+            const tag_byte = try self.reader.takeByte();
 
             const decoded = common.decodeTag(tag_byte);
             const val_type = try std.meta.intToEnum(std.meta.Tag(common.Value), decoded.tag);
@@ -427,10 +373,8 @@ pub fn Reader(comptime limits: ReadLimits) type {
                 }
                 break :blk l;
             } else try self.readBytesLength(val_type, decoded.data);
-            if (len > self.bytes.len - self.pos) return error.UnexpectedEof;
 
-            const result = self.bytes[self.pos..][0..len];
-            self.pos += len;
+            const result = try self.reader.take(len);
             return result;
         }
 
@@ -476,24 +420,23 @@ pub fn Reader(comptime limits: ReadLimits) type {
             return lhs.orig_index < rhs.orig_index;
         }
 
-        /// Reads multiple paths from the buffer in a single pass.
-        /// Each query's `value` is populated with the found Value or null.
-        /// Malformed paths yield null for that query.
-        pub fn readPaths(self: *Self, queries: []PathQuery) Error!void {
-            const saved_pos = self.pos;
-            const saved_depth = self.depth;
-            const saved_counts = self.iteration_counts;
+        // /// Reads multiple paths from the buffer in a single pass.
+        // /// Each query's `value` is populated with the found Value or null.
+        // /// Malformed paths yield null for that query.
+        // /// This will not rewind the position when done, ensure the reader is at the start of the data to read.
+        // /// This can only be used if the reader is from a fixed buffer.
+        // pub fn readPaths(self: *Self, queries: []PathQuery) Error!void {
+        //     const saved_depth = self.depth;
+        //     const saved_counts = self.iteration_counts;
 
-            self.pos = 0;
-            self.depth = 0;
-            self.iteration_counts = [_]usize{0} ** counter_stack_size;
+        //     self.depth = 0;
+        //     self.iteration_counts = [_]usize{0} ** counter_stack_size;
 
-            try self.readPathsInternal(queries);
+        //     try self.readPathsInternal(queries);
 
-            self.pos = saved_pos;
-            self.depth = saved_depth;
-            self.iteration_counts = saved_counts;
-        }
+        //     self.depth = saved_depth;
+        //     self.iteration_counts = saved_counts;
+        // }
 
         fn readPathsInternal(self: *Self, queries: []PathQuery) Error!void {
             if (queries.len == 0) return;
@@ -532,11 +475,11 @@ pub fn Reader(comptime limits: ReadLimits) type {
 
             const root_peek = try self.peekTag();
 
-                if (root_peek.tag != .object and root_peek.tag != .array) {
-                    if (remaining > 0) {
-                        var has_empty = false;
-                        for (queries) |q| {
-                            if (!q.resolved and q.path.len == 0) {
+            if (root_peek.tag != .object and root_peek.tag != .array) {
+                if (remaining > 0) {
+                    var has_empty = false;
+                    for (queries) |q| {
+                        if (!q.resolved and q.path.len == 0) {
                             has_empty = true;
                             break;
                         }
@@ -551,8 +494,8 @@ pub fn Reader(comptime limits: ReadLimits) type {
                                 remaining -= 1;
                             }
                         }
-                        }
                     }
+                }
 
                 if (queries.len > 1) {
                     const LessIdx = struct {
@@ -878,27 +821,28 @@ pub fn Reader(comptime limits: ReadLimits) type {
             const off = index * elem_size;
             const chunk = ta.bytes[off..][0..elem_size];
 
-	            return switch (ta.elem) {
-	                .u8 => .{ .u8 = chunk[0] },
-	                .i8 => .{ .i8 = @bitCast(chunk[0]) },
-	                .u16 => .{ .u16 = std.mem.readInt(u16, chunk[0..2], .little) },
-	                .i16 => .{ .i16 = std.mem.readInt(i16, chunk[0..2], .little) },
-	                .u32 => .{ .u32 = std.mem.readInt(u32, chunk[0..4], .little) },
-	                .i32 => .{ .i32 = std.mem.readInt(i32, chunk[0..4], .little) },
-	                .u64 => .{ .u64 = std.mem.readInt(u64, chunk[0..8], .little) },
-	                .i64 => .{ .i64 = std.mem.readInt(i64, chunk[0..8], .little) },
-	                .f32 => .{ .f32 = @bitCast(std.mem.readInt(u32, chunk[0..4], .little)) },
-	                .f64 => .{ .f64 = @bitCast(std.mem.readInt(u64, chunk[0..8], .little)) },
-	                .f16 => .{ .f16 = @bitCast(std.mem.readInt(u16, chunk[0..2], .little)) },
-	            };
-	        }
-
-        /// Reads a value at a given path. Path format: "key", "key.nested", "array[0]", "obj.arr[2].name"
-        /// Returns null if the path doesn't exist or points to an incompatible type.
-        pub fn readPath(self: *Self, path_str: []const u8) Error!?common.Value {
-            var q = [_]PathQuery{.{ .path = path_str }};
-            try self.readPaths(q[0..]);
-            return q[0].value;
+            return switch (ta.elem) {
+                .u8 => .{ .u8 = chunk[0] },
+                .i8 => .{ .i8 = @bitCast(chunk[0]) },
+                .u16 => .{ .u16 = std.mem.readInt(u16, chunk[0..2], .little) },
+                .i16 => .{ .i16 = std.mem.readInt(i16, chunk[0..2], .little) },
+                .u32 => .{ .u32 = std.mem.readInt(u32, chunk[0..4], .little) },
+                .i32 => .{ .i32 = std.mem.readInt(i32, chunk[0..4], .little) },
+                .u64 => .{ .u64 = std.mem.readInt(u64, chunk[0..8], .little) },
+                .i64 => .{ .i64 = std.mem.readInt(i64, chunk[0..8], .little) },
+                .f32 => .{ .f32 = @bitCast(std.mem.readInt(u32, chunk[0..4], .little)) },
+                .f64 => .{ .f64 = @bitCast(std.mem.readInt(u64, chunk[0..8], .little)) },
+                .f16 => .{ .f16 = @bitCast(std.mem.readInt(u16, chunk[0..2], .little)) },
+            };
         }
+
+        // /// Reads a value at a given path. Path format: "key", "key.nested", "array[0]", "obj.arr[2].name"
+        // /// Returns null if the path doesn't exist or points to an incompatible type.
+        // /// This can only be used if the reader is from a fixed buffer.
+        // pub fn readPath(self: *Self, path_str: []const u8) Error!?common.Value {
+        //     var q = [_]PathQuery{.{ .path = path_str }};
+        //     try self.readPaths(q[0..]);
+        //     return q[0].value;
+        // }
     };
 }

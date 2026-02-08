@@ -1,5 +1,8 @@
 # ⚡ bufzilla
 
+Note: This is my modified version for ZBuf and so does not really focus on maintaining original functionality.
+You probably don't want this fork.
+
 _buffer • zilla_
 
 A compact and fast **binary encoding format** in pure Zig.

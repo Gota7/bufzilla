@@ -48,10 +48,10 @@ pub const Update = struct {
     }
 };
 
-/// Applies a set of updates to an already-encoded object buffer, streaming the new encoding to the current writer
-pub fn applyUpdates(self: *Writer, encoded_buf: []const u8, updates: []Update) (Error || reader_mod.Error || updates_mod.Error)!void {
-    try updates_mod.applyUpdates(Writer, self, encoded_buf, updates);
-}
+// /// Applies a set of updates to an already-encoded object buffer, streaming the new encoding to the current writer
+// pub fn applyUpdates(self: *Writer, encoded_buf: []const u8, updates: []Update) (Error || reader_mod.Error || updates_mod.Error)!void {
+//     try updates_mod.applyUpdates(Writer, self, encoded_buf, updates);
+// }
 
 /// Writes a single data item to the underlying writer
 pub fn write(self: *Writer, data: common.Value, comptime tag: std.meta.Tag(common.Value)) Error!void {

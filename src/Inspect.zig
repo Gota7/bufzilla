@@ -26,10 +26,10 @@ pub fn Inspect(comptime limits: ReadLimits) type {
 
         /// Initialize the Inspector with encoded data buffer and a Writer to write the strings to.
         /// The caller is responsible for managing the writer's lifecycle (flushing, etc.)
-        pub fn init(data: []const u8, writer: *Io.Writer, options: InspectOptions) Self {
+        pub fn init(reader: *Io.Reader, writer: *Io.Writer, options: InspectOptions) Self {
             return .{
                 .writer = writer,
-                .reader = ReaderType.init(data),
+                .reader = ReaderType.init(reader),
                 .options = options,
             };
         }
