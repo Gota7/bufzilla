@@ -215,16 +215,16 @@ fn writeTypedArraySliceWithElem(self: *Writer, comptime ElemT: type, comptime el
 
 /// Write any of the supported primitive data types.
 /// Serializes structs and arrays recursively.
-pub fn writeAny(self: *Writer, value: anytype) Error!void {
+pub fn writeAny(self: *Writer, value: anytype, write_nulls: bool) Error!void {
     const T = @TypeOf(value);
-    try self.writeAnyExplicit(T, value);
+    try self.writeAnyExplicit(T, value, write_nulls);
 }
 
 /// Writes an item when type is known at comptime, but value may be runtime-known.
-pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
+pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T, write_nulls: bool) Error!void {
     switch (@typeInfo(T)) {
-        .comptime_int => try self.writeAnyExplicit(i64, @intCast(data)),
-        .comptime_float => try self.writeAnyExplicit(f64, @floatCast(data)),
+        .comptime_int => try self.writeAnyExplicit(i64, @intCast(data), write_nulls),
+        .comptime_float => try self.writeAnyExplicit(f64, @floatCast(data), write_nulls),
         .int => switch (T) {
             u64 => {
                 if (data <= 7) {
@@ -233,9 +233,9 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
                     try self.write(common.Value{ .varIntUnsigned = data }, .varIntUnsigned);
                 }
             },
-            u32 => try self.writeAnyExplicit(u64, data),
-            u16 => try self.writeAnyExplicit(u64, data),
-            u8 => try self.writeAnyExplicit(u64, data),
+            u32 => try self.writeAnyExplicit(u64, data, write_nulls),
+            u16 => try self.writeAnyExplicit(u64, data, write_nulls),
+            u8 => try self.writeAnyExplicit(u64, data, write_nulls),
             i64 => {
                 if (data >= 0 and data <= 7) {
                     try self.write(common.Value{ .smallIntPositive = @intCast(data) }, .smallIntPositive);
@@ -247,9 +247,9 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
                     try self.write(common.Value{ .varIntSignedNegative = data }, .varIntSignedNegative);
                 }
             },
-            i32 => try self.writeAnyExplicit(i64, data),
-            i16 => try self.writeAnyExplicit(i64, data),
-            i8 => try self.writeAnyExplicit(i64, data),
+            i32 => try self.writeAnyExplicit(i64, data, write_nulls),
+            i16 => try self.writeAnyExplicit(i64, data, write_nulls),
+            i8 => try self.writeAnyExplicit(i64, data, write_nulls),
             else => @compileError("bufzilla: unsupported integer type: " ++ @typeName(T)),
         },
         .float => switch (T) {
@@ -260,9 +260,9 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
         },
         .optional => {
             if (data) |v| {
-                try self.writeAnyExplicit(@TypeOf(v), v);
+                try self.writeAnyExplicit(@TypeOf(v), v, write_nulls);
             } else {
-                try self.writeAnyExplicit(@TypeOf(null), null);
+                try self.writeAnyExplicit(@TypeOf(null), null, write_nulls);
             }
         },
         .bool => try self.write(common.Value{ .bool = data }, .bool),
@@ -279,7 +279,7 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
                 // slice of any supported type
                 try self.startArray();
                 for (data) |item| {
-                    try self.writeAnyExplicit(@TypeOf(item), item);
+                    try self.writeAnyExplicit(@TypeOf(item), item, write_nulls);
                 }
                 try self.endContainer();
             } else if (ptr_info.size == .one) {
@@ -298,14 +298,14 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
                             // pointer to array of other types - write as array
                             try self.startArray();
                             for (data) |item| {
-                                try self.writeAnyExplicit(@TypeOf(item), item);
+                                try self.writeAnyExplicit(@TypeOf(item), item, write_nulls);
                             }
                             try self.endContainer();
                         }
                     },
                     else => {
                         // pointer to single value - dereference and write
-                        try self.writeAnyExplicit(ptr_info.child, data.*);
+                        try self.writeAnyExplicit(ptr_info.child, data.*, write_nulls);
                     },
                 }
             } else {
@@ -315,42 +315,44 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
         .@"struct" => |struct_info| {
             try self.startObject();
             inline for (struct_info.fields) |field| {
-                // Precompute encoded key prefix
-                const key_prefix = comptime blk: {
-                    if (field.name.len <= 7) {
-                        const tag_byte = common.encodeTag(@intFromEnum(common.Value.smallBytes), @truncate(field.name.len));
-                        var prefix: [1 + field.name.len]u8 = undefined;
-                        prefix[0] = tag_byte;
-                        for (0..field.name.len) |i| {
-                            prefix[1 + i] = field.name[i];
+                if (@typeInfo(field.type) != .optional or write_nulls or @field(data, field.name) != null) {
+                    // Precompute encoded key prefix
+                    const key_prefix = comptime blk: {
+                        if (field.name.len <= 7) {
+                            const tag_byte = common.encodeTag(@intFromEnum(common.Value.smallBytes), @truncate(field.name.len));
+                            var prefix: [1 + field.name.len]u8 = undefined;
+                            prefix[0] = tag_byte;
+                            for (0..field.name.len) |i| {
+                                prefix[1 + i] = field.name[i];
+                            }
+                            break :blk prefix[0 .. 1 + field.name.len].*;
+                        } else {
+                            const varint = common.encodeVarInt(field.name.len);
+                            const tag_byte = common.encodeTag(@intFromEnum(common.Value.varIntBytes), varint.size);
+                            const len_size: usize = @as(usize, varint.size) + 1;
+                            var prefix: [1 + 8 + field.name.len]u8 = undefined;
+                            prefix[0] = tag_byte;
+                            for (0..len_size) |i| {
+                                prefix[1 + i] = varint.bytes[i];
+                            }
+                            // Include the field name in the prefix
+                            for (0..field.name.len) |i| {
+                                prefix[1 + len_size + i] = field.name[i];
+                            }
+                            break :blk prefix[0 .. 1 + len_size + field.name.len].*;
                         }
-                        break :blk prefix[0 .. 1 + field.name.len].*;
-                    } else {
-                        const varint = common.encodeVarInt(field.name.len);
-                        const tag_byte = common.encodeTag(@intFromEnum(common.Value.varIntBytes), varint.size);
-                        const len_size: usize = @as(usize, varint.size) + 1;
-                        var prefix: [1 + 8 + field.name.len]u8 = undefined;
-                        prefix[0] = tag_byte;
-                        for (0..len_size) |i| {
-                            prefix[1 + i] = varint.bytes[i];
-                        }
-                        // Include the field name in the prefix
-                        for (0..field.name.len) |i| {
-                            prefix[1 + len_size + i] = field.name[i];
-                        }
-                        break :blk prefix[0 .. 1 + len_size + field.name.len].*;
-                    }
-                };
-                try self.raw.writeAll(&key_prefix);
-                const val = @field(data, field.name);
-                try self.writeAnyExplicit(@TypeOf(val), val);
+                    };
+                    try self.raw.writeAll(&key_prefix);
+                    const val = @field(data, field.name);
+                    try self.writeAnyExplicit(@TypeOf(val), val, true);
+                }
             }
             try self.endContainer();
         },
         .array => {
             try self.startArray();
             inline for (data) |item| {
-                try self.writeAnyExplicit(@TypeOf(item), item);
+                try self.writeAnyExplicit(@TypeOf(item), item, write_nulls);
             }
             try self.endContainer();
         },
@@ -358,7 +360,7 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
             try self.startArray();
             var i: usize = 0;
             while (i < vector_info.len) : (i += 1) {
-                try self.writeAnyExplicit(@TypeOf(data[i]), data[i]);
+                try self.writeAnyExplicit(@TypeOf(data[i]), data[i], write_nulls);
             }
             try self.endContainer();
         },
@@ -366,7 +368,7 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
             inline for (enum_info.fields) |field| {
                 const field_tag = @field(T, field.name);
                 if (field_tag == data) {
-                    try self.writeAnyExplicit(@TypeOf(field.name), field.name);
+                    try self.writeAnyExplicit(@TypeOf(field.name), field.name, write_nulls);
                     break;
                 }
             }
@@ -378,8 +380,8 @@ pub fn writeAnyExplicit(self: *Writer, comptime T: type, data: T) Error!void {
                     const field_tag = @field(TT, field.name);
                     if (field_tag == tag) {
                         const field_value = @field(data, field.name);
-                        try self.writeAnyExplicit(@TypeOf(field.name), field.name);
-                        try self.writeAnyExplicit(@TypeOf(field_value), field_value);
+                        try self.writeAnyExplicit(@TypeOf(field.name), field.name, write_nulls);
+                        try self.writeAnyExplicit(@TypeOf(field_value), field_value, write_nulls);
                         break;
                     }
                 }

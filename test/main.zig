@@ -29,21 +29,21 @@ test "writer/allocating: primitive data types" {
     var writer = Writer.init(&aw.writer);
 
     try writer.startObject();
-    try writer.writeAny("a");
-    try writer.writeAny(123);
-    try writer.writeAny("b");
+    try writer.writeAny("a", true);
+    try writer.writeAny(123, true);
+    try writer.writeAny("b", true);
     try writer.startObject();
-    try writer.writeAny("c");
-    try writer.writeAny(true);
+    try writer.writeAny("c", true);
+    try writer.writeAny(true, true);
     try writer.endContainer();
-    try writer.writeAny("d");
+    try writer.writeAny("d", true);
     try writer.startArray();
-    try writer.writeAny("f64");
-    try writer.writeAny(123.123);
-    try writer.writeAny("null");
-    try writer.writeAny(null);
-    try writer.writeAny("string");
-    try writer.writeAny("value");
+    try writer.writeAny("f64", true);
+    try writer.writeAny(123.123, true);
+    try writer.writeAny("null", true);
+    try writer.writeAny(null, true);
+    try writer.writeAny("string", true);
+    try writer.writeAny("value", true);
     try writer.endContainer();
     try writer.endContainer();
 
@@ -78,7 +78,7 @@ test "writer/allocating: zig struct serialization" {
         .d = &.{ .{ .f64 = 123.123 }, .{ .null = null }, .{ .string = "value" } },
     };
 
-    try writer.writeAny(data);
+    try writer.writeAny(data, true);
 
     const written = aw.written();
 
@@ -97,21 +97,21 @@ test "writer/fixed: primitive data types" {
     var writer = Writer.init(&fixed);
 
     try writer.startObject();
-    try writer.writeAny("a");
-    try writer.writeAny(123);
-    try writer.writeAny("b");
+    try writer.writeAny("a", true);
+    try writer.writeAny(123, true);
+    try writer.writeAny("b", true);
     try writer.startObject();
-    try writer.writeAny("c");
-    try writer.writeAny(true);
+    try writer.writeAny("c", true);
+    try writer.writeAny(true, true);
     try writer.endContainer();
-    try writer.writeAny("d");
+    try writer.writeAny("d", true);
     try writer.startArray();
-    try writer.writeAny("f64");
-    try writer.writeAny(123.123);
-    try writer.writeAny("null");
-    try writer.writeAny(null);
-    try writer.writeAny("string");
-    try writer.writeAny("value");
+    try writer.writeAny("f64", true);
+    try writer.writeAny(123.123, true);
+    try writer.writeAny("null", true);
+    try writer.writeAny(null, true);
+    try writer.writeAny("string", true);
+    try writer.writeAny("value", true);
     try writer.endContainer();
     try writer.endContainer();
 
@@ -127,12 +127,12 @@ test "writer/fixed: simple values" {
 
     var writer = Writer.init(&fixed);
 
-    try writer.writeAny("hello");
-    try writer.writeAny(@as(i64, 42));
-    try writer.writeAny(@as(f64, 3.14));
-    try writer.writeAny(true);
-    try writer.writeAny(false);
-    try writer.writeAny(null);
+    try writer.writeAny("hello", true);
+    try writer.writeAny(@as(i64, 42), true);
+    try writer.writeAny(@as(f64, 3.14), true);
+    try writer.writeAny(true, true);
+    try writer.writeAny(false, true);
+    try writer.writeAny(null, true);
 
     const written = fixed.buffered();
     try std.testing.expect(written.len > 0);
@@ -155,7 +155,7 @@ test "writer/fixed: small tags are used" {
         var fixed = Io.Writer.fixed(&buffer);
         var writer = Writer.init(&fixed);
 
-        try writer.writeAny(@as(i64, 7));
+        try writer.writeAny(@as(i64, 7), true);
         const written = fixed.buffered();
         try std.testing.expectEqual(@as(usize, 1), written.len);
 
@@ -170,7 +170,7 @@ test "writer/fixed: small tags are used" {
         var fixed = Io.Writer.fixed(&buffer);
         var writer = Writer.init(&fixed);
 
-        try writer.writeAny(@as(i64, -7));
+        try writer.writeAny(@as(i64, -7), true);
         const written = fixed.buffered();
         try std.testing.expectEqual(@as(usize, 1), written.len);
 
@@ -185,7 +185,7 @@ test "writer/fixed: small tags are used" {
         var fixed = Io.Writer.fixed(&buffer);
         var writer = Writer.init(&fixed);
 
-        try writer.writeAny("1234567"); // len=7
+        try writer.writeAny("1234567", true); // len=7
         const written = fixed.buffered();
         try std.testing.expectEqual(@as(usize, 1 + 7), written.len);
 
@@ -201,7 +201,7 @@ test "writer/fixed: small tags are used" {
         var fixed = Io.Writer.fixed(&buffer);
         var writer = Writer.init(&fixed);
 
-        try writer.writeAny(S{ .a = 1 });
+        try writer.writeAny(S{ .a = 1 }, true);
         const written = fixed.buffered();
         try std.testing.expect(written.len > 0);
 
@@ -223,7 +223,7 @@ test "writer/reader: typedArray roundtrip and skipping" {
         var writer = Writer.init(&fixed);
 
         try writer.writeTypedArray(vals[0..]);
-        try writer.writeAny(true);
+        try writer.writeAny(true, true);
 
         const written = fixed.buffered();
 
@@ -410,15 +410,15 @@ test "writer/fixed: pointer to array" {
 
     // Pointer to byte array (should encode as bytes)
     const byte_arr = [_]u8{ 1, 2, 3 };
-    try writer.writeAny(&byte_arr);
+    try writer.writeAny(&byte_arr, true);
 
     // Pointer to int array (should encode as array)
     const int_arr = [_]i64{ 10, 20, 30 };
-    try writer.writeAny(&int_arr);
+    try writer.writeAny(&int_arr, true);
 
     // Pointer to single value
     const single: i64 = 42;
-    try writer.writeAny(&single);
+    try writer.writeAny(&single, true);
 
     const written = fixed.buffered();
     try std.testing.expect(written.len > 0);
@@ -743,10 +743,10 @@ test "reader: object iteration" {
     var writer = Writer.init(&fixed);
 
     try writer.startObject();
-    try writer.writeAny("key1");
-    try writer.writeAny(@as(i64, 100));
-    try writer.writeAny("key2");
-    try writer.writeAny("value2");
+    try writer.writeAny("key1", true);
+    try writer.writeAny(@as(i64, 100), true);
+    try writer.writeAny("key2", true);
+    try writer.writeAny("value2", true);
     try writer.endContainer();
 
     var fixed_reader = Io.Reader.fixed(fixed.buffered());
@@ -776,9 +776,9 @@ test "reader: array iteration" {
     var writer = Writer.init(&fixed);
 
     try writer.startArray();
-    try writer.writeAny(@as(i64, 1));
-    try writer.writeAny(@as(i64, 2));
-    try writer.writeAny(@as(i64, 3));
+    try writer.writeAny(@as(i64, 1), true);
+    try writer.writeAny(@as(i64, 2), true);
+    try writer.writeAny(@as(i64, 3), true);
     try writer.endContainer();
 
     var fixed_reader = Io.Reader.fixed(fixed.buffered());
@@ -833,8 +833,8 @@ test "inspect: custom options" {
     var writer = Writer.init(&enc_fixed);
 
     try writer.startObject();
-    try writer.writeAny("pi");
-    try writer.writeAny(@as(f64, 3.14159265358979));
+    try writer.writeAny("pi", true);
+    try writer.writeAny(@as(f64, 3.14159265358979), true);
     try writer.endContainer();
 
     // Inspect with custom indent and precision
@@ -874,13 +874,13 @@ test "consistency: allocating and fixed produce identical output" {
     var aw = Io.Writer.Allocating.init(std.testing.allocator);
     defer aw.deinit();
     var writer1 = Writer.init(&aw.writer);
-    try writer1.writeAny(data);
+    try writer1.writeAny(data, true);
 
     // Write with fixed
     var buffer: [256]u8 = undefined;
     var fixed = Io.Writer.fixed(&buffer);
     var writer2 = Writer.init(&fixed);
-    try writer2.writeAny(data);
+    try writer2.writeAny(data, true);
 
     // Must be identical
     try std.testing.expectEqualSlices(u8, aw.written(), fixed.buffered());
@@ -974,7 +974,7 @@ test "inspect: control characters are escaped in JSON" {
     var enc_buffer: [32]u8 = undefined;
     var enc_fixed = Io.Writer.fixed(&enc_buffer);
     var writer = Writer.init(&enc_fixed);
-    try writer.writeAny(test_string);
+    try writer.writeAny(test_string, true);
 
     var out_buffer: [64]u8 = undefined;
     var out_fixed = Io.Writer.fixed(&out_buffer);
@@ -993,7 +993,7 @@ test "inspect: invalid UTF-8 returns error" {
     var enc_buffer: [32]u8 = undefined;
     var enc_fixed = Io.Writer.fixed(&enc_buffer);
     var writer = Writer.init(&enc_fixed);
-    try writer.writeAny(invalid_utf8);
+    try writer.writeAny(invalid_utf8, true);
 
     var out_buffer: [64]u8 = undefined;
     var out_fixed = Io.Writer.fixed(&out_buffer);
@@ -1010,7 +1010,7 @@ test "inspect: valid UTF-8 with multibyte chars works" {
     var enc_buffer: [64]u8 = undefined;
     var enc_fixed = Io.Writer.fixed(&enc_buffer);
     var writer = Writer.init(&enc_fixed);
-    try writer.writeAny(valid_utf8);
+    try writer.writeAny(valid_utf8, true);
 
     var out_buffer: [128]u8 = undefined;
     var out_fixed = Io.Writer.fixed(&out_buffer);
@@ -1031,7 +1031,7 @@ test "writer/reader: i64 max value" {
     var writer = Writer.init(&fixed);
 
     const val: i64 = 9223372036854775807; // i64 max
-    try writer.writeAny(val);
+    try writer.writeAny(val, true);
 
     const written = fixed.buffered();
     var fixed_reader = Io.Reader.fixed(written);
@@ -1046,7 +1046,7 @@ test "writer/reader: i64 min value" {
     var writer = Writer.init(&fixed);
 
     const val: i64 = -9223372036854775808; // i64 min
-    try writer.writeAny(val);
+    try writer.writeAny(val, true);
 
     const written = fixed.buffered();
     var fixed_reader = Io.Reader.fixed(written);
@@ -1061,7 +1061,7 @@ test "writer/reader: u64 max value" {
     var writer = Writer.init(&fixed);
 
     const val: u64 = 18446744073709551615; // u64 max
-    try writer.writeAny(val);
+    try writer.writeAny(val, true);
 
     const written = fixed.buffered();
     var fixed_reader = Io.Reader.fixed(written);
@@ -1075,7 +1075,7 @@ test "writer/reader: smallUint encodes 0..7" {
     var fixed = Io.Writer.fixed(&buffer);
     var writer = Writer.init(&fixed);
 
-    try writer.writeAny(@as(u64, 7));
+    try writer.writeAny(@as(u64, 7), true);
 
     const written = fixed.buffered();
     try std.testing.expectEqual(@as(usize, 1), written.len);
@@ -1251,7 +1251,7 @@ test "reader: max_bytes_length limit enforced for varIntBytes" {
 
     // Write a 100-byte string
     const long_string = "x" ** 100;
-    try writer.writeAny(long_string);
+    try writer.writeAny(long_string, true);
 
     // Set max_bytes_length to 50
     var fixed_reader = Io.Reader.fixed(enc_fixed.buffered());
@@ -1283,7 +1283,7 @@ test "reader: max_bytes_length null allows large bytes" {
 
     // Write a 1000-byte string
     const long_string = "y" ** 1000;
-    try writer.writeAny(long_string);
+    try writer.writeAny(long_string, true);
 
     // Set max_bytes_length to null
     var fixed_reader = Io.Reader.fixed(enc_fixed.buffered());
@@ -1301,7 +1301,7 @@ test "reader: max_array_length limit enforced" {
     // Create array with 100 elements
     try writer.startArray();
     for (0..100) |i| {
-        try writer.writeAny(@as(i64, @intCast(i)));
+        try writer.writeAny(@as(i64, @intCast(i)), true);
     }
     try writer.endContainer();
 
@@ -1335,8 +1335,8 @@ test "reader: max_object_size limit enforced" {
     for (0..100) |i| {
         var key_buf: [16]u8 = undefined;
         const key = std.fmt.bufPrint(&key_buf, "key{d}", .{i}) catch unreachable;
-        try writer.writeAny(key);
-        try writer.writeAny(@as(i64, @intCast(i)));
+        try writer.writeAny(key, true);
+        try writer.writeAny(@as(i64, @intCast(i)), true);
     }
     try writer.endContainer();
 
@@ -1389,12 +1389,12 @@ test "reader: sibling containers have separate counts" {
     try writer.startArray(); // outer array
     try writer.startArray(); // first inner array with 40 elements
     for (0..40) |i| {
-        try writer.writeAny(@as(i64, @intCast(i)));
+        try writer.writeAny(@as(i64, @intCast(i)), true);
     }
     try writer.endContainer();
     try writer.startArray(); // second inner array with 40 elements
     for (0..40) |i| {
-        try writer.writeAny(@as(i64, @intCast(i)));
+        try writer.writeAny(@as(i64, @intCast(i)), true);
     }
     try writer.endContainer();
     try writer.endContainer();
@@ -1430,8 +1430,8 @@ test "reader: combined limits enforced" {
 
     // Create nested structure with large string
     try writer.startObject();
-    try writer.writeAny("data");
-    try writer.writeAny("z" ** 200);
+    try writer.writeAny("data", true);
+    try writer.writeAny("z" ** 200, true);
     try writer.endContainer();
 
     // Set strict limits on everything
