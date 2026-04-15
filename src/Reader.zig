@@ -75,7 +75,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
         fn readBytes(self: *Self, comptime T: type) !T {
             return switch (@typeInfo(T)) {
                 .int => try self.reader.takeInt(T, .little),
-                .float => |float_info| @bitCast(try self.reader.takeInt(@Type(.{ .int = .{ .signedness = .signed, .bits = float_info.bits } }), .little)),
+                .float => |float_info| @bitCast(try self.reader.takeInt(@Int(.signed, float_info.bits), .little)),
                 else => @compileError("readBytes: unsupported type"),
             };
         }
@@ -87,7 +87,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
 
             // Decode the tag
             const decoded_tag = common.decodeTag(tag_byte);
-            const val_type = try std.meta.intToEnum(std.meta.Tag(common.Value), decoded_tag.tag);
+            const val_type = std.enums.fromInt(std.meta.Tag(common.Value), decoded_tag.tag) orelse return error.InvalidEnumTag;
 
             switch (val_type) {
                 .containerEnd => {
@@ -260,7 +260,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
 
         inline fn readTypedArrayHeader(self: *Self, tag_data: u3) !TypedArrayHeader {
             const elem_byte = try self.reader.takeByte();
-            const elem = try std.meta.intToEnum(common.TypedArrayElem, elem_byte);
+            const elem = std.enums.fromInt(common.TypedArrayElem, elem_byte) orelse return error.InvalidEnumTag;
 
             const count_len: usize = @as(usize, tag_data) + 1;
             const count_u64 = common.decodeVarInt(try self.reader.take(count_len));
@@ -324,7 +324,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
             const tag_byte = try self.reader.takeByte();
 
             const decoded = common.decodeTag(tag_byte);
-            const val_type = try std.meta.intToEnum(std.meta.Tag(common.Value), decoded.tag);
+            const val_type = std.enums.fromInt(std.meta.Tag(common.Value), decoded.tag) orelse return error.InvalidEnumTag;
 
             switch (val_type) {
                 .array, .object => {
@@ -337,7 +337,7 @@ pub fn Reader(comptime limits: ReadLimits) type {
                         const inner_tag = try self.reader.takeByte();
 
                         const inner_decoded = common.decodeTag(inner_tag);
-                        const inner_type = try std.meta.intToEnum(std.meta.Tag(common.Value), inner_decoded.tag);
+                        const inner_type = std.enums.fromInt(std.meta.Tag(common.Value), inner_decoded.tag) orelse return error.InvalidEnumTag;
 
                         const ev = try skipOneValue(self, inner_decoded, inner_type);
                         switch (ev) {

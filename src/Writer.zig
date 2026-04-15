@@ -41,7 +41,7 @@ pub const Update = struct {
             .writeFn = struct {
                 fn write(writer: *Writer, ctx: *const anyopaque) Error!void {
                     const ptr: *const T = @ptrCast(@alignCast(ctx));
-                    try writer.writeAny(ptr.*);
+                    try writer.writeAny(ptr.*, true);
                 }
             }.write,
         };
